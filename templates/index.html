@@ -1,0 +1,77 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Recherche d'entreprises - Centre d'appels</title>
+    <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+</head>
+<body>
+    <div class="container">
+        <header>
+            <h1 class="logo-newbiz">NEWBIZ</h1>
+        </header>
+
+        <div class="search-panel">
+            <div class="input-group">
+                <label for="secteur">Secteur / Activité</label>
+                <input type="text" id="secteur" placeholder="Ex: boulangerie, plomberie, 47.11C">
+            </div>
+            
+            <div class="input-group">
+                <label for="departement">Département</label>
+                <input type="text" id="departement" placeholder="Ex: 33, 75, 13" maxlength="3">
+            </div>
+            
+            <button id="searchBtn" class="btn btn-primary">
+                <span class="btn-icon">🔍</span>
+                Rechercher
+            </button>
+            
+            <button id="exportBtn" class="btn btn-secondary" disabled>
+                <span class="btn-icon">📥</span>
+                Télécharger Excel
+            </button>
+        </div>
+
+        <div id="status" class="status-message"></div>
+
+        <div class="results-container">
+            <div id="loading" class="loading" style="display: none;">
+                <div class="spinner"></div>
+                <p>Recherche en cours...</p>
+            </div>
+
+            <div id="resultsTable" class="table-wrapper" style="display: none;">
+                <table id="results">
+                    <thead>
+                        <tr>
+                            <th>N°</th>
+                            <th>Nom</th>
+                            <th>Adresse</th>
+                            <th>Secteur</th>
+                            <th>SIRET</th>
+                            <th>SIREN</th>
+                            <th>Effectif</th>
+                            <th>État</th>
+                            <th>OPCO</th>
+                            <th>Téléphone</th>
+                            <th>Dirigeant</th>
+                            <th>Statut</th>
+                            <th>Date de modification</th>
+                            <th>FunBooster</th>
+                            <th>Observation</th>
+                        </tr>
+                    </thead>
+                    <tbody id="resultsBody">
+                    </tbody>
+                </table>
+            </div>
+        </div>
+    </div>
+
+    <script src="{{ url_for('static', filename='script.js') }}"></script>
+</body>
+</html>
+
