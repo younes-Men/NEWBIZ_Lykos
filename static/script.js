@@ -16,45 +16,76 @@ const statutOptions = {
     'Pi': { color: '#343a40', bg: '#e2e3e5', border: '#d6d8db' }
 };
 
-// Sauvegarder le statut via l'API serveur
-async function setStatut(siret, statut) {
+// Fonctions localStorage pour les statuts
+function loadStatuts() {
     try {
-        const response = await fetch('/api/save-statut', {
-            method: 'POST',
-            headers: {
-                'Content-Type': 'application/json',
-            },
-            body: JSON.stringify({ siret, statut })
-        });
-        
-        const data = await response.json();
-        if (data.success) {
-            return data.date_modification;
-        }
-        return null;
-    } catch (error) {
-        console.error('Erreur lors de la sauvegarde du statut:', error);
-        return null;
+        const data = localStorage.getItem('entrepriseStatuts');
+        return data ? JSON.parse(data) : {};
+    } catch (e) {
+        return {};
     }
 }
 
-// Sauvegarder FunBooster ou Observation via l'API serveur
-async function saveField(siret, field, value) {
+function saveStatuts(statuts) {
     try {
-        const response = await fetch('/api/save-field', {
-            method: 'POST',
-            headers: {
-                'Content-Type': 'application/json',
-            },
-            body: JSON.stringify({ siret, field, value })
-        });
-        
-        const data = await response.json();
-        return data.success;
-    } catch (error) {
-        console.error('Erreur lors de la sauvegarde:', error);
-        return false;
+        localStorage.setItem('entrepriseStatuts', JSON.stringify(statuts));
+    } catch (e) {
+        console.error('Erreur lors de la sauvegarde des statuts:', e);
     }
+}
+
+function getStatut(siret) {
+    const statuts = loadStatuts();
+    return statuts[siret] || { statut: 'A traiter', date_modification: '' };
+}
+
+function setStatut(siret, statut) {
+    const statuts = loadStatuts();
+    statuts[siret] = {
+        statut: statut,
+        date_modification: new Date().toLocaleString('fr-FR', {
+            day: '2-digit',
+            month: '2-digit',
+            year: 'numeric',
+            hour: '2-digit',
+            minute: '2-digit'
+        })
+    };
+    saveStatuts(statuts);
+    return statuts[siret].date_modification;
+}
+
+// Fonctions localStorage pour FunBooster et Observation
+function loadEntrepriseData() {
+    try {
+        const data = localStorage.getItem('entrepriseData');
+        return data ? JSON.parse(data) : {};
+    } catch (e) {
+        return {};
+    }
+}
+
+function saveEntrepriseData(data) {
+    try {
+        localStorage.setItem('entrepriseData', JSON.stringify(data));
+    } catch (e) {
+        console.error('Erreur lors de la sauvegarde des données:', e);
+    }
+}
+
+function getEntrepriseData(siret) {
+    const data = loadEntrepriseData();
+    return data[siret] || { funbooster: '', observation: '' };
+}
+
+function saveField(siret, field, value) {
+    const data = loadEntrepriseData();
+    if (!data[siret]) {
+        data[siret] = { funbooster: '', observation: '' };
+    }
+    data[siret][field] = value;
+    saveEntrepriseData(data);
+    return true;
 }
 
 document.getElementById('searchBtn').addEventListener('click', searchCompanies);
@@ -149,15 +180,17 @@ function displayResults(results) {
         const etatClass = etat === 'Actif' ? 'etat-actif' : 'etat-inactif';
         const etatDisplay = `<span class="${etatClass}">${escapeHtml(etat)}</span>`;
         
-        // Récupérer les données depuis les résultats (qui viennent déjà du serveur)
+        // Récupérer les données depuis localStorage
         const siret = ent.siret || '';
-        const currentStatut = ent.statut || 'A traiter';
-        const dateModification = ent.date_modification || '-';
+        const statutData = getStatut(siret);
+        const currentStatut = statutData.statut || 'A traiter';
+        const dateModification = statutData.date_modification || '-';
         const statutStyle = statutOptions[currentStatut] || statutOptions['A traiter'];
         
-        // Récupérer FunBooster et Observation depuis les résultats
-        const funboosterValue = ent.funbooster || '';
-        const observationValue = ent.observation || '';
+        // Récupérer FunBooster et Observation depuis localStorage
+        const entrepriseData = getEntrepriseData(siret);
+        const funboosterValue = entrepriseData.funbooster || '';
+        const observationValue = entrepriseData.observation || '';
         
         // Créer le select de statut
         let statutSelect = '<select class="statut-select" data-siret="' + escapeHtml(siret) + '">';
@@ -207,10 +240,10 @@ function displayResults(results) {
         // Ajouter l'événement onChange au select
         const select = row.querySelector('.statut-select');
         if (select) {
-            select.addEventListener('change', async function() {
+            select.addEventListener('change', function() {
                 const siretValue = this.getAttribute('data-siret');
                 const newStatut = this.value;
-                const dateStr = await setStatut(siretValue, newStatut);
+                const dateStr = setStatut(siretValue, newStatut);
                 updateStatutStyle(this, newStatut);
                 // Mettre à jour la date de modification dans la cellule
                 const dateCell = row.querySelector('.date-modification');
@@ -224,13 +257,13 @@ function displayResults(results) {
         // Ajouter les événements de sauvegarde pour FunBooster et Observation
         const saveIcons = row.querySelectorAll('.save-icon');
         saveIcons.forEach(icon => {
-            icon.addEventListener('click', async function() {
+            icon.addEventListener('click', function() {
                 const siretValue = this.getAttribute('data-siret');
                 const field = this.getAttribute('data-field');
                 const input = row.querySelector(`.${field}-input`);
                 if (input) {
                     const value = input.value.trim();
-                    const success = await saveField(siretValue, field, value);
+                    const success = saveField(siretValue, field, value);
                     // Feedback visuel
                     if (success) {
                         this.style.transform = 'scale(1.2)';
@@ -252,8 +285,19 @@ async function exportToExcel() {
         return;
     }
     
-    // Les données sont déjà dans currentResults (récupérées depuis le serveur)
-    const resultsWithStatuts = currentResults;
+    // Ajouter les données depuis localStorage aux résultats
+    const resultsWithStatuts = currentResults.map(ent => {
+        const siret = ent.siret || '';
+        const statutData = getStatut(siret);
+        const entrepriseData = getEntrepriseData(siret);
+        return {
+            ...ent,
+            statut: statutData.statut || 'A traiter',
+            date_modification: statutData.date_modification || '',
+            funbooster: entrepriseData.funbooster || '',
+            observation: entrepriseData.observation || ''
+        };
+    });
     
     try {
         const response = await fetch('/api/export', {

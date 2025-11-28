@@ -1,7 +1,6 @@
 import os
 import re
 from flask import Flask, render_template, request, jsonify, send_file
-from flask_sqlalchemy import SQLAlchemy
 from dotenv import load_dotenv
 import pandas as pd
 from datetime import datetime
@@ -11,37 +10,6 @@ from urllib.parse import quote
 from scraper.sirene import SireneClient
 
 app = Flask(__name__)
-
-# Configuration de la base de données
-basedir = os.path.abspath(os.path.dirname(__file__))
-app.config['SQLALCHEMY_DATABASE_URI'] = os.environ.get('DATABASE_URL') or \
-    'sqlite:///' + os.path.join(basedir, 'newbiz.db')
-app.config['SQLALCHEMY_TRACK_MODIFICATIONS'] = False
-
-db = SQLAlchemy(app)
-
-# Modèle pour stocker les données des entreprises
-class EntrepriseData(db.Model):
-    __tablename__ = 'entreprise_data'
-    
-    siret = db.Column(db.String(14), primary_key=True)
-    statut = db.Column(db.String(50), default='A traiter')
-    date_modification = db.Column(db.String(50))
-    funbooster = db.Column(db.Text, default='')
-    observation = db.Column(db.Text, default='')
-    
-    def to_dict(self):
-        return {
-            'siret': self.siret,
-            'statut': self.statut or 'A traiter',
-            'date_modification': self.date_modification or '',
-            'funbooster': self.funbooster or '',
-            'observation': self.observation or ''
-        }
-
-# Créer les tables au démarrage
-with app.app_context():
-    db.create_all()
 
 # Charger la clé API
 load_dotenv()
@@ -124,7 +92,6 @@ def search_companies():
         
         # Ajouter les liens Pappers (dirigeant), PagesJaunes (téléphone)
         # et France Compétences (OPCO) à chaque résultat
-        # Et récupérer les données sauvegardées depuis la base de données
         for ent in active_results:
             siren = ent.get("siren", "")
             nom = ent.get("nom", "")
@@ -134,20 +101,6 @@ def search_companies():
             ent["pappers_url"] = generate_pappers_url(siren)
             ent["pagesjaunes_url"] = generate_pagesjaunes_url(nom, adresse)
             ent["opco_url"] = generate_opco_url(siret)
-            
-            # Récupérer les données depuis la base de données
-            if siret:
-                entreprise_data = EntrepriseData.query.filter_by(siret=siret).first()
-                if entreprise_data:
-                    ent["statut"] = entreprise_data.statut or 'A traiter'
-                    ent["date_modification"] = entreprise_data.date_modification or ''
-                    ent["funbooster"] = entreprise_data.funbooster or ''
-                    ent["observation"] = entreprise_data.observation or ''
-                else:
-                    ent["statut"] = 'A traiter'
-                    ent["date_modification"] = ''
-                    ent["funbooster"] = ''
-                    ent["observation"] = ''
         
         return jsonify({
             'success': True,
@@ -159,67 +112,6 @@ def search_companies():
         return jsonify({'error': f'Erreur lors de la recherche : {str(e)}'}), 500
 
 
-@app.route('/api/save-statut', methods=['POST'])
-def save_statut():
-    """API endpoint pour sauvegarder le statut d'une entreprise."""
-    try:
-        data = request.json
-        siret = data.get('siret', '').strip()
-        statut = data.get('statut', 'A traiter').strip()
-        
-        if not siret:
-            return jsonify({'error': 'SIRET manquant.'}), 400
-        
-        # Créer ou mettre à jour l'enregistrement
-        entreprise_data = EntrepriseData.query.filter_by(siret=siret).first()
-        
-        if not entreprise_data:
-            entreprise_data = EntrepriseData(siret=siret)
-            db.session.add(entreprise_data)
-        
-        entreprise_data.statut = statut
-        entreprise_data.date_modification = datetime.now().strftime('%d/%m/%Y %H:%M')
-        
-        db.session.commit()
-        
-        return jsonify({
-            'success': True,
-            'date_modification': entreprise_data.date_modification
-        })
-    
-    except Exception as e:
-        db.session.rollback()
-        return jsonify({'error': f'Erreur lors de la sauvegarde : {str(e)}'}), 500
-
-
-@app.route('/api/save-field', methods=['POST'])
-def save_field():
-    """API endpoint pour sauvegarder FunBooster ou Observation."""
-    try:
-        data = request.json
-        siret = data.get('siret', '').strip()
-        field = data.get('field', '').strip()  # 'funbooster' ou 'observation'
-        value = data.get('value', '').strip()
-        
-        if not siret or field not in ['funbooster', 'observation']:
-            return jsonify({'error': 'Paramètres invalides.'}), 400
-        
-        # Créer ou mettre à jour l'enregistrement
-        entreprise_data = EntrepriseData.query.filter_by(siret=siret).first()
-        
-        if not entreprise_data:
-            entreprise_data = EntrepriseData(siret=siret)
-            db.session.add(entreprise_data)
-        
-        setattr(entreprise_data, field, value)
-        
-        db.session.commit()
-        
-        return jsonify({'success': True})
-    
-    except Exception as e:
-        db.session.rollback()
-        return jsonify({'error': f'Erreur lors de la sauvegarde : {str(e)}'}), 500
 
 
 @app.route('/api/export', methods=['POST'])
@@ -256,17 +148,6 @@ def export_to_excel():
         
         if not active_results:
             return jsonify({'error': 'Aucune entreprise active à exporter.'}), 400
-        
-        # Récupérer les données depuis la base de données pour chaque entreprise
-        for ent in active_results:
-            siret = ent.get("siret", "").strip()
-            if siret:
-                entreprise_data = EntrepriseData.query.filter_by(siret=siret).first()
-                if entreprise_data:
-                    ent["statut"] = entreprise_data.statut or 'A traiter'
-                    ent["date_modification"] = entreprise_data.date_modification or ''
-                    ent["funbooster"] = entreprise_data.funbooster or ''
-                    ent["observation"] = entreprise_data.observation or ''
         
         # Préparer les données pour Excel avec nettoyage
         excel_data = []
@@ -390,5 +271,6 @@ if __name__ == '__main__':
     # En production, Render utilise gunicorn, donc on ne lance pas app.run()
     # En développement local, on peut lancer avec app.run()
     port = int(os.environ.get('PORT', 5000))
-    app.run(debug=False, host='0.0.0.0', port=port)
+    # host='127.0.0.1' pour accès local uniquement, '0.0.0.0' pour accès réseau
+    app.run(debug=False, host='127.0.0.1', port=port)
 
