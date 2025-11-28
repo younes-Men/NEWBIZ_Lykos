@@ -16,6 +16,12 @@ ENV/
 # Excel files
 temp/*.xlsx
 
+# Database
+*.db
+*.sqlite
+*.sqlite3
+newbiz.db
+
 # IDE
 .vscode/
 .idea/

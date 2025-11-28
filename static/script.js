@@ -16,73 +16,45 @@ const statutOptions = {
     'Pi': { color: '#343a40', bg: '#e2e3e5', border: '#d6d8db' }
 };
 
-// Charger les statuts sauvegardés depuis localStorage
-function loadStatuts() {
-    const saved = localStorage.getItem('entreprise_statuts');
-    return saved ? JSON.parse(saved) : {};
-}
-
-// Sauvegarder les statuts dans localStorage
-function saveStatuts(statuts) {
-    localStorage.setItem('entreprise_statuts', JSON.stringify(statuts));
-}
-
-// Obtenir le statut et la date d'une entreprise (par SIRET)
-function getStatut(siret) {
-    const statuts = loadStatuts();
-    if (statuts[siret]) {
-        return {
-            statut: statuts[siret].statut || statuts[siret] || 'A traiter', // Compatibilité ancien format
-            date: statuts[siret].date || null
-        };
+// Sauvegarder le statut via l'API serveur
+async function setStatut(siret, statut) {
+    try {
+        const response = await fetch('/api/save-statut', {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+            },
+            body: JSON.stringify({ siret, statut })
+        });
+        
+        const data = await response.json();
+        if (data.success) {
+            return data.date_modification;
+        }
+        return null;
+    } catch (error) {
+        console.error('Erreur lors de la sauvegarde du statut:', error);
+        return null;
     }
-    return { statut: 'A traiter', date: null };
 }
 
-// Définir le statut d'une entreprise avec la date
-function setStatut(siret, statut) {
-    const statuts = loadStatuts();
-    const now = new Date();
-    const dateStr = now.toLocaleString('fr-FR', {
-        day: '2-digit',
-        month: '2-digit',
-        year: 'numeric',
-        hour: '2-digit',
-        minute: '2-digit'
-    });
-    statuts[siret] = {
-        statut: statut,
-        date: dateStr
-    };
-    saveStatuts(statuts);
-    return dateStr;
-}
-
-// Charger les données FunBooster et Observation depuis localStorage
-function loadEntrepriseData() {
-    const saved = localStorage.getItem('entreprise_data');
-    return saved ? JSON.parse(saved) : {};
-}
-
-// Sauvegarder les données FunBooster et Observation
-function saveEntrepriseData(data) {
-    localStorage.setItem('entreprise_data', JSON.stringify(data));
-}
-
-// Obtenir FunBooster et Observation d'une entreprise
-function getEntrepriseData(siret) {
-    const data = loadEntrepriseData();
-    return data[siret] || { funbooster: '', observation: '' };
-}
-
-// Sauvegarder FunBooster ou Observation
-function saveField(siret, field, value) {
-    const data = loadEntrepriseData();
-    if (!data[siret]) {
-        data[siret] = { funbooster: '', observation: '' };
+// Sauvegarder FunBooster ou Observation via l'API serveur
+async function saveField(siret, field, value) {
+    try {
+        const response = await fetch('/api/save-field', {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+            },
+            body: JSON.stringify({ siret, field, value })
+        });
+        
+        const data = await response.json();
+        return data.success;
+    } catch (error) {
+        console.error('Erreur lors de la sauvegarde:', error);
+        return false;
     }
-    data[siret][field] = value;
-    saveEntrepriseData(data);
 }
 
 document.getElementById('searchBtn').addEventListener('click', searchCompanies);
@@ -177,17 +149,15 @@ function displayResults(results) {
         const etatClass = etat === 'Actif' ? 'etat-actif' : 'etat-inactif';
         const etatDisplay = `<span class="${etatClass}">${escapeHtml(etat)}</span>`;
         
-        // Récupérer le statut sauvegardé ou utiliser "A traiter" par défaut
+        // Récupérer les données depuis les résultats (qui viennent déjà du serveur)
         const siret = ent.siret || '';
-        const statutData = getStatut(siret);
-        const currentStatut = statutData.statut;
-        const dateModification = statutData.date || '-';
+        const currentStatut = ent.statut || 'A traiter';
+        const dateModification = ent.date_modification || '-';
         const statutStyle = statutOptions[currentStatut] || statutOptions['A traiter'];
         
-        // Récupérer FunBooster et Observation sauvegardés
-        const entrepriseData = getEntrepriseData(siret);
-        const funboosterValue = entrepriseData.funbooster || '';
-        const observationValue = entrepriseData.observation || '';
+        // Récupérer FunBooster et Observation depuis les résultats
+        const funboosterValue = ent.funbooster || '';
+        const observationValue = ent.observation || '';
         
         // Créer le select de statut
         let statutSelect = '<select class="statut-select" data-siret="' + escapeHtml(siret) + '">';
@@ -237,14 +207,14 @@ function displayResults(results) {
         // Ajouter l'événement onChange au select
         const select = row.querySelector('.statut-select');
         if (select) {
-            select.addEventListener('change', function() {
+            select.addEventListener('change', async function() {
                 const siretValue = this.getAttribute('data-siret');
                 const newStatut = this.value;
-                const dateStr = setStatut(siretValue, newStatut);
+                const dateStr = await setStatut(siretValue, newStatut);
                 updateStatutStyle(this, newStatut);
                 // Mettre à jour la date de modification dans la cellule
                 const dateCell = row.querySelector('.date-modification');
-                if (dateCell) {
+                if (dateCell && dateStr) {
                     dateCell.textContent = dateStr;
                 }
             });
@@ -254,20 +224,22 @@ function displayResults(results) {
         // Ajouter les événements de sauvegarde pour FunBooster et Observation
         const saveIcons = row.querySelectorAll('.save-icon');
         saveIcons.forEach(icon => {
-            icon.addEventListener('click', function() {
+            icon.addEventListener('click', async function() {
                 const siretValue = this.getAttribute('data-siret');
                 const field = this.getAttribute('data-field');
                 const input = row.querySelector(`.${field}-input`);
                 if (input) {
                     const value = input.value.trim();
-                    saveField(siretValue, field, value);
+                    const success = await saveField(siretValue, field, value);
                     // Feedback visuel
-                    this.style.transform = 'scale(1.2)';
-                    this.style.color = '#00bcd4';
-                    setTimeout(() => {
-                        this.style.transform = 'scale(1)';
-                        this.style.color = '';
-                    }, 300);
+                    if (success) {
+                        this.style.transform = 'scale(1.2)';
+                        this.style.color = '#00bcd4';
+                        setTimeout(() => {
+                            this.style.transform = 'scale(1)';
+                            this.style.color = '';
+                        }, 300);
+                    }
                 }
             });
         });
@@ -280,33 +252,8 @@ async function exportToExcel() {
         return;
     }
     
-    // Ajouter les statuts sauvegardés et les données FunBooster/Observation aux résultats avant l'export
-    const statuts = loadStatuts();
-    const entrepriseData = loadEntrepriseData();
-    const resultsWithStatuts = currentResults.map(ent => {
-        const siret = ent.siret || '';
-        const statutData = statuts[siret];
-        const data = entrepriseData[siret] || { funbooster: '', observation: '' };
-        
-        let statut = 'A traiter';
-        let date_modification = '';
-        
-        if (statutData && typeof statutData === 'object') {
-            statut = statutData.statut || 'A traiter';
-            date_modification = statutData.date || '';
-        } else if (statutData) {
-            // Compatibilité ancien format
-            statut = statutData || 'A traiter';
-        }
-        
-        return {
-            ...ent,
-            statut: statut,
-            date_modification: date_modification,
-            funbooster: data.funbooster || '',
-            observation: data.observation || ''
-        };
-    });
+    // Les données sont déjà dans currentResults (récupérées depuis le serveur)
+    const resultsWithStatuts = currentResults;
     
     try {
         const response = await fetch('/api/export', {
